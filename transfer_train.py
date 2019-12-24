@@ -5,10 +5,11 @@ import os
 
 import ipdb
 import matplotlib
+from itertools import cycle
 from tqdm import tqdm
 
 from model.frcnn.utils.config import opt
-from model.frcnn.data.dataset import Dataset, TestDataset, inverse_normalize
+from model.frcnn.data.traindataset import TrainDataset, TestDataset, inverse_normalize
 from model.frcnn.model.faster_rcnn_vgg16 import FasterRCNNVGG16
 from torch.utils import data as data_
 from transfer_trainer import TransferTrainer
@@ -48,39 +49,48 @@ def eval(dataloader, faster_rcnn, test_num=10000):
     return result
 
 
-def train(**kwargs):
+def transfer_train(faster_rcnn, **kwargs):
     opt._parse(kwargs)
 
-    dataset = Dataset(opt)
+    dataset = TrainDataset(opt)
     print('load data')
-    dataloader = data_.DataLoader(dataset,
-                                  batch_size=1,
-                                  shuffle=True,
-                                  # pin_memory=True,
-                                  num_workers=opt.num_workers)
-    testset = TestDataset(opt)
+    source_dataloader = data_.DataLoader(dataset,
+                                         batch_size=1,
+                                         shuffle=True,
+                                         # pin_memory=True,
+                                         num_workers=opt.num_workers)
+
+    target_set = TestDataset(opt, 'val', data_path=opt.dota_data_dir)
+    target_dataloader = data_.DataLoader(target_set,
+                                         batch_size=1,
+                                         num_workers=opt.num_workers,
+                                         shuffle=True,
+                                         pin_memory=True)
+
+    testset = TestDataset(opt, data_path=opt.dota_data_dir)
     test_dataloader = data_.DataLoader(testset,
                                        batch_size=1,
                                        num_workers=opt.test_num_workers,
                                        shuffle=False,
-                                       pin_memory=True
-                                       )
-    faster_rcnn = FasterRCNNVGG16()
-    print('model construct completed')
-    trainer = TransferTrainer(faster_rcnn).cuda()
-    if opt.load_path:
-        trainer.load(opt.load_path)
-        print('load pretrained model from %s' % opt.load_path)
+                                       pin_memory=True)
+
+    trainer = TransferTrainer(faster_rcnn, opt.dota_num_class).cuda()
+
     trainer.vis.text(dataset.db.label_names, win='labels')
     best_map = 0
     lr_ = opt.lr
-    for epoch in range(opt.epoch):
+    target_len = len(target_set)
+    for epoch in range(opt.transfer_epoch):
         trainer.reset_meters()
-        for ii, (img, bbox_, label_, scale) in tqdm(enumerate(dataloader)):
-            scale = at.scalar(scale)
-            img, bbox, label = img.cuda().float(), bbox_.cuda(), label_.cuda()
-            trainer.train_step(img, bbox, label, scale)
-
+        for ii, (s_img, s_bbox_, s_label_, s_scale,
+                 t_img, t_bbox_, t_label_, t_scale
+                 ) in tqdm(enumerate(zip(source_dataloader, cycle(target_dataloader)))):
+            s_scale = at.scalar(s_scale)
+            s_img, s_bbox, s_label = s_img.cuda().float(), s_bbox_.cuda(), s_label_.cuda()
+            t_img, t_bbox, t_label = t_img.cuda().float(), t_bbox_.cuda(), t_label_.cuda()
+            trainer.train_step(s_img, s_bbox, s_label, s_scale,
+                               t_img, t_bbox, t_label, t_scale)
+# TODO DP CONTINUE HERE & EVAL
             if (ii + 1) % opt.plot_every == 0:
                 if os.path.exists(opt.debug_file):
                     ipdb.set_trace()
@@ -89,10 +99,10 @@ def train(**kwargs):
                 trainer.vis.plot_many(trainer.get_meter_data())
 
                 # plot groud truth bboxes
-                ori_img_ = inverse_normalize(at.tonumpy(img[0]))
+                ori_img_ = inverse_normalize(at.tonumpy(s_img[0]))
                 gt_img = visdom_bbox(ori_img_,
-                                     at.tonumpy(bbox_[0]),
-                                     at.tonumpy(label_[0]))
+                                     at.tonumpy(s_bbox_[0]),
+                                     at.tonumpy(s_label_[0]))
                 trainer.vis.img('gt_img', gt_img)
 
                 # plot predicti bboxes

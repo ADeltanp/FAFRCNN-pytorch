@@ -1,4 +1,4 @@
-from __future__ import  absolute_import
+from __future__ import absolute_import
 # though cupy is not used but without this line, it raise errors...
 import cupy as cp
 import os
@@ -8,7 +8,7 @@ import matplotlib
 from tqdm import tqdm
 
 from model.frcnn.utils.config import opt
-from model.frcnn.data.dataset import Dataset, TestDataset, inverse_normalize
+from model.frcnn.data.traindataset import TrainDataset, TestDataset, inverse_normalize
 from model.frcnn.model.faster_rcnn_vgg16 import FasterRCNNVGG16
 from torch.utils import data as data_
 from transfer_trainer import TransferTrainer
@@ -50,7 +50,7 @@ def eval(dataloader, faster_rcnn, test_num=10000):
 def train(**kwargs):
     opt._parse(kwargs)
 
-    dataset = Dataset(opt)
+    dataset = TrainDataset(opt)
     print('load data')
     dataloader = data_.DataLoader(dataset, \
                                   batch_size=1, \

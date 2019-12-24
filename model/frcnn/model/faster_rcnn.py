@@ -1,4 +1,4 @@
-from __future__ import  absolute_import
+from __future__ import absolute_import
 from __future__ import division
 import torch as t
 import numpy as np
@@ -8,7 +8,7 @@ from model.frcnn.model.utils.bbox_tools import loc2bbox
 from model.frcnn.model.utils.nms import non_maximum_suppression
 
 from torch import nn
-from model.frcnn.data.dataset import preprocess
+from model.frcnn.data.traindataset import preprocess
 from torch.nn import functional as F
 from model.frcnn.utils.config import opt
 

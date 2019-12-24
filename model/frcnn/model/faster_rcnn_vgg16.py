@@ -1,4 +1,4 @@
-from __future__ import  absolute_import
+from __future__ import absolute_import
 import torch as t
 from torch import nn
 from torchvision.models import vgg16

@@ -4,14 +4,14 @@ import ipdb
 import matplotlib
 from tqdm import tqdm
 
-from utils.config import opt
-from data.dataset import Dataset, TestDataset
-from model import FasterRCNNVGG16
+from model.frcnn.utils.config import opt
+from model.frcnn.data.traindataset import TrainDataset, TestDataset
+from model.frcnn.model.faster_rcnn_vgg16 import FasterRCNNVGG16
 from torch.utils import data as data_
 from transfer_trainer import TransferTrainer
-from utils import array_tool as at
-from utils.vis_tool import visdom_bbox
-from utils.eval_tool import eval_detection_voc
+from model.frcnn.utils import array_tool as at
+from model.frcnn.utils.vis_tool import visdom_bbox
+from model.frcnn.utils.eval_tool import eval_detection_voc
 
 matplotlib.use('agg')
 
@@ -39,7 +39,7 @@ def eval(dataloader, faster_rcnn, test_num=10000):
 def train(**kwargs):
     opt._parse(kwargs)
 
-    dataset = Dataset(opt)
+    dataset = TrainDataset(opt)
     print('load data')
     dataloader = data_.DataLoader(dataset, \
                                   batch_size=1, \

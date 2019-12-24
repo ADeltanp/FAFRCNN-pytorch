@@ -1,12 +1,13 @@
-from __future__ import  absolute_import
-from __future__ import  division
+from __future__ import absolute_import
+from __future__ import division
 import torch as t
-from data.voc_dataset import VOCBboxDataset
+from torch.utils.data import Dataset
+from model.frcnn.data.voc_dataset import VOCBboxDataset
 from skimage import transform as sktsf
 from torchvision import transforms as tvtsf
-from data import util
+from model.frcnn.data import util
 import numpy as np
-from utils.config import opt
+from model.frcnn.utils.config import opt
 
 
 def inverse_normalize(img):
@@ -97,7 +98,7 @@ class Transform(object):
         return img, bbox, label, scale
 
 
-class Dataset:
+class TrainDataset(Dataset):
     def __init__(self, opt):
         self.opt = opt
         self.db = VOCBboxDataset(opt.voc_data_dir)
@@ -115,10 +116,28 @@ class Dataset:
         return len(self.db)
 
 
-class TestDataset:
-    def __init__(self, opt, split='test', use_difficult=True):
+class TargetDataset(Dataset):
+    def __init__(self, opt):
         self.opt = opt
-        self.db = VOCBboxDataset(opt.voc_data_dir, split=split, use_difficult=use_difficult)
+        self.db = VOCBboxDataset(opt.voc_data_dir)
+        self.tsf = Transform(opt.min_size, opt.max_size)
+
+    def __getitem__(self, idx):
+        ori_img, bbox, label, difficult = self.db.get_example(idx)
+
+        img, bbox, label, scale = self.tsf((ori_img, bbox, label))
+        # TODO: check whose stride is negative to fix this instead copy all
+        # some of the strides of a given numpy array are negative.
+        return img.copy(), bbox.copy(), label.copy(), scale
+
+    def __len__(self):
+        return len(self.db)
+
+
+class TestDataset(Dataset):
+    def __init__(self, opt, split='test', use_difficult=True, data_path=opt.voc_data_dir):
+        self.opt = opt
+        self.db = VOCBboxDataset(data_path, split=split, use_difficult=use_difficult)
 
     def __getitem__(self, idx):
         ori_img, bbox, label, difficult = self.db.get_example(idx)

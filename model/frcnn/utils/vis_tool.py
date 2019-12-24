@@ -4,9 +4,9 @@ import numpy as np
 import matplotlib
 import torch as t
 import visdom
-
-matplotlib.use('Agg')
 from matplotlib import pyplot as plot
+matplotlib.use('Agg')
+
 
 # from data.voc_dataset import VOC_BBOX_LABEL_NAMES
 

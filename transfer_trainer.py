@@ -81,7 +81,7 @@ class TransferTrainer(nn.Module):
         self.roi_cm = ConfusionMeter(21)
         self.meters = {k: AverageValueMeter() for k in LossTuple._fields}  # average loss
 
-    def forward(self, source_imgs, target_imgs, s_bboxes, s_labels, t_bboxes, t_labels, scale):
+    def forward(self, source_imgs, s_bboxes, s_labels, s_scale, target_imgs, t_bboxes, t_labels, t_scale):
         """Forward Faster R-CNN and calculate losses.
 
         Here are notations used.
@@ -125,10 +125,10 @@ class TransferTrainer(nn.Module):
         img_gan_loss = self.image_level_gan_loss(s_features, t_features, s_img_size, t_img_size)
 
         s_rpn_locs, s_rpn_scores, s_rois, s_roi_indices, s_anchor = \
-            self.faster_rcnn.rpn(s_features, s_img_size, scale)
+            self.faster_rcnn.rpn(s_features, s_img_size, s_scale)
 
         t_rpn_locs, t_rpn_scores, t_rois, t_roi_indices, t_anchor = \
-            self.faster_rcnn.rpn(t_features, t_img_size, scale)
+            self.faster_rcnn.rpn(t_features, t_img_size, t_scale)
 
         # Since batch size is one, convert variables to singular form
         s_bbox = s_bboxes[0]
@@ -279,10 +279,11 @@ class TransferTrainer(nn.Module):
         loss = criterion(out, labels)
         return loss
 
-    def train_step(self, source_imgs, target_imgs, s_bboxes, s_labels, t_bboxes, t_labels, scale):
+    def train_step(self, s_imgs, s_bboxes, s_labels, s_scale, t_imgs, t_bboxes, t_labels, t_scale):
         self.optimizer.zero_grad()
         self.gan_optim.zero_grad()
-        losses, img_gan_loss, ins_gan_loss = self.forward(source_imgs, target_imgs, s_bboxes, s_labels, t_bboxes, t_labels, scale)
+        losses, img_gan_loss, ins_gan_loss = self.forward(s_imgs, s_bboxes, s_labels, s_scale,
+                                                          t_imgs, t_bboxes, t_labels, t_scale)
         losses.total_loss.backward()
         img_gan_loss.backward()
         ins_gan_loss.backward()

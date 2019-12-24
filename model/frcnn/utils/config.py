@@ -2,14 +2,34 @@ from pprint import pprint
 
 
 # Default Configs for training
-# NOTE that, config items could be overwriten by passing argument through command line.
+# NOTE that, config items could be overwritten by passing argument through command line.
 # e.g. --voc-data-dir='./data/'
 
 class Config:
     # data
-    voc_data_dir = '/home/cy/.chainer/dataset/pfnet/chainercv/voc/VOCdevkit/VOC2007/'
-    min_size = 600  # image resize
-    max_size = 1000 # image resize
+    DOTA_LABEL_NAMES = (
+        'plane',
+        'ship',
+        'storage_tank',
+        'baseball_diamond',
+        'tennis_court',
+        'basketball_court',
+        'ground_track_field',
+        'harbor',
+        'bridge',
+        'large_vehicle',
+        'small_vehicle',
+        'helicopter',
+        'roundabout',
+        'soccer_ball_field',
+        'swimming_pool',
+        'container_crane'
+    )
+    voc_data_dir = 'E:/Data/NN/VOCdevkit/VOC2012'
+    dota_data_dir = 'E:/Data/NN/DOTA'
+    dota_num_class = len(DOTA_LABEL_NAMES)
+    min_size = 600   # image resize
+    max_size = 1000  # image resize
     num_workers = 8
     test_num_workers = 8
 
@@ -35,11 +55,11 @@ class Config:
 
     # training
     epoch = 14
+    transfer_epoch = 14
 
-
-    use_adam = False # Use Adam optimizer
-    use_chainer = False # try match everything as chainer
-    use_drop = False # use dropout in RoIHead
+    use_adam = False  # Use Adam optimizer
+    use_chainer = False  # try match everything as chainer
+    use_drop = False  # use dropout in RoIHead
     # debug
     debug_file = '/tmp/debugf'
 
