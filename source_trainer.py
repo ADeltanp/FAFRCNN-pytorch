@@ -22,7 +22,7 @@ LossTuple = namedtuple('LossTuple',
                         ])
 
 
-class FasterRCNNTrainer(nn.Module):
+class SourceTrainer(nn.Module):
     """wrapper for conveniently training. return losses
 
     The losses include:
@@ -40,7 +40,7 @@ class FasterRCNNTrainer(nn.Module):
     """
 
     def __init__(self, faster_rcnn):
-        super(FasterRCNNTrainer, self).__init__()
+        super(SourceTrainer, self).__init__()
 
         self.faster_rcnn = faster_rcnn
         self.rpn_sigma = opt.rpn_sigma

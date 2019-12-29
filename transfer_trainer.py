@@ -24,6 +24,8 @@ LossTuple = namedtuple('LossTuple',
                         'rpn_cls_loss',
                         'roi_loc_loss',
                         'roi_cls_loss',
+                        'img_gan_loss',
+                        'ins_gan_loss',
                         'total_loss'
                         ])
 
@@ -220,10 +222,10 @@ class TransferTrainer(nn.Module):
 
         self.roi_cm.add(at.totensor(roi_score, False), s_gt_roi_label.data.long())
 
-        losses = [rpn_loc_loss, rpn_cls_loss, roi_loc_loss, roi_cls_loss]
+        losses = [rpn_loc_loss, rpn_cls_loss, roi_loc_loss, roi_cls_loss, img_gan_loss, ins_gan_loss]
         losses = losses + [sum(losses)]
 
-        return LossTuple(*losses), img_gan_loss, ins_gan_loss
+        return LossTuple(*losses)
 
     def image_level_gan_loss(self, s_feat, t_feat, s_img_size, t_img_size):
         s_grid_l, s_grid_m, s_grid_s = self.split_pooling((s_img_size[1], s_img_size[0]), s_feat)
@@ -279,14 +281,14 @@ class TransferTrainer(nn.Module):
         loss = criterion(out, labels)
         return loss
 
-    def train_step(self, s_imgs, s_bboxes, s_labels, s_scale, t_imgs, t_bboxes, t_labels, t_scale):
+    def train_step(self,
+                   s_imgs, s_bboxes, s_labels, s_scale,
+                   t_imgs, t_bboxes, t_labels, t_scale):
         self.optimizer.zero_grad()
         self.gan_optim.zero_grad()
-        losses, img_gan_loss, ins_gan_loss = self.forward(s_imgs, s_bboxes, s_labels, s_scale,
-                                                          t_imgs, t_bboxes, t_labels, t_scale)
+        losses = self.forward(s_imgs, s_bboxes, s_labels, s_scale,
+                              t_imgs, t_bboxes, t_labels, t_scale)
         losses.total_loss.backward()
-        img_gan_loss.backward()
-        ins_gan_loss.backward()
         self.optimizer.step()
         self.gan_optim.step()
         self.update_meters(losses)
@@ -328,7 +330,7 @@ class TransferTrainer(nn.Module):
         self.vis.save([self.vis.env])
         return save_path
 
-    def load(self, path, load_optimizer=True, parse_opt=False, ):
+    def load(self, path, load_optimizer=True, parse_opt=False):
         state_dict = t.load(path)
         if 'model' in state_dict:
             self.faster_rcnn.load_state_dict(state_dict['model'])
@@ -337,8 +339,6 @@ class TransferTrainer(nn.Module):
             return self
         if parse_opt:
             opt._parse(state_dict['config'])
-        if 'optimizer' in state_dict and load_optimizer:
-            self.optimizer.load_state_dict(state_dict['optimizer'])
         return self
 
     def update_meters(self, losses):

@@ -5,34 +5,14 @@ import matplotlib
 import torch as t
 import visdom
 from matplotlib import pyplot as plot
+from model.frcnn.utils.config import opt
 matplotlib.use('Agg')
 
 
 # from data.voc_dataset import VOC_BBOX_LABEL_NAMES
 
-
-VOC_BBOX_LABEL_NAMES = (
-    'fly',
-    'bike',
-    'bird',
-    'boat',
-    'pin',
-    'bus',
-    'c',
-    'cat',
-    'chair',
-    'cow',
-    'table',
-    'dog',
-    'horse',
-    'moto',
-    'p',
-    'plant',
-    'shep',
-    'sofa',
-    'train',
-    'tv',
-)
+# TODO LABEL NAMES
+VOC_BBOX_LABEL_NAMES = opt.DOTA_LABEL_NAMES
 
 
 def vis_image(img, ax=None):
@@ -206,7 +186,7 @@ class Visualizer(object):
         """
         self.plot('loss',1.00)
         """
-        x = self.index.get(name, 0)
+        x = self.index.get(name, default=0)
         self.vis.line(Y=np.array([y]), X=np.array([x]),
                       win=name,
                       opts=dict(title=name),
