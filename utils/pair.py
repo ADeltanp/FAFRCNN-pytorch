@@ -3,7 +3,7 @@ import math
 import random
 
 
-def pair(source, target, source_num=128, target_num=128):
+def pair(source, target, source_num=32, target_num=32):
     """
     :param source: (t.Tensor) source features or grids to be paired. (R, 7, 7) or (R, 4096)
     :param target: (t.Tensor) target features or grids to be paired. (R', 7, 7) or (R', 4096)
@@ -20,11 +20,13 @@ def pair(source, target, source_num=128, target_num=128):
     t_shuffle = t.randperm(t_capacity)
     s_shuffle = t.randperm(s_capacity)
     for i in range(t_capacity):
+        if len(s_t_pair) >= target_num:
+            break
         t_idx = t_shuffle[i]
         for j in range(s_capacity):
             s_idx = s_shuffle[j]
-            tensor = (t.cat((source[s_idx], target[t_idx])) if random.random() > 0.5
-                      else t.cat((target[t_idx], source[s_idx])))
+            tensor = (t.cat((source[s_idx], target[t_idx]), dim=-1) if random.random() > 0.5
+                      else t.cat((target[t_idx], source[s_idx]), dim=-1))
             s_t_pair.append(tensor)
             if len(s_t_pair) >= target_num:
                 break
@@ -33,13 +35,15 @@ def pair(source, target, source_num=128, target_num=128):
     s_s_pair = list()
     s_shuffle_2 = t.randperm(s_capacity)
     for i in range(s_capacity):
+        if len(s_s_pair) >= source_num:
+            break
         s_idx_1 = s_shuffle[i]
         for j in range(s_capacity):
             s_idx_2 = s_shuffle_2[j]
-            tensor = t.cat((source[s_idx_1], source[s_idx_2]))
+            tensor = t.cat((source[s_idx_1], source[s_idx_2]), dim=-1)
             s_s_pair.append(tensor)
             if len(s_s_pair) >= source_num:
                 break
     s_s_pair = t.stack(s_s_pair)  # (source_num, 14, 7) or (source_num, 4096 * 2)
 
-    return s_s_pair, s_t_pair
+    return s_s_pair.squeeze(), s_t_pair.squeeze()

@@ -1,14 +1,13 @@
 from __future__ import absolute_import
 # though cupy is not used but without this line, it raise errors...
-import cupy as cp
 import os
 
 import ipdb
 import matplotlib
 from tqdm import tqdm
 
-from model.frcnn.utils.config import opt
-from model.frcnn.data.traindataset import TrainDataset, TestDataset, inverse_normalize
+from utils.config import opt
+from data.dataset import TrainDataset, TestDataset, inverse_normalize
 from model.frcnn.model.faster_rcnn_vgg16 import FasterRCNNVGG16
 from torch.utils import data as data_
 from source_trainer import SourceTrainer
@@ -50,16 +49,16 @@ def eval(dataloader, faster_rcnn, test_num=10000):
 
 def source_train():
     print('load source training data')
-    dataset = TrainDataset(opt)
-    dataloader = data_.DataLoader(dataset,
-                                  batch_size=1,
+    clear_train = TrainDataset(opt, opt.clear_data_dir)
+    dataloader = data_.DataLoader(clear_train,
+                                  batch_size=opt.batch_size,
                                   shuffle=True,
                                   # pin_memory=True,
                                   num_workers=opt.num_workers)
 
-    testset = TestDataset(opt)
-    test_dataloader = data_.DataLoader(testset,
-                                       batch_size=1,
+    clear_test = TestDataset(opt, opt.clear_data_dir)
+    test_dataloader = data_.DataLoader(clear_test,
+                                       batch_size=opt.batch_size,
                                        num_workers=opt.test_num_workers,
                                        shuffle=False,
                                        pin_memory=True)
@@ -69,7 +68,7 @@ def source_train():
     if opt.load_path:
         trainer.load(opt.load_path)
         print('load pre-trained model from %s' % opt.load_path)
-    trainer.vis.text(dataset.db.label_names, win='labels')
+    trainer.vis.text(clear_train.db.label_names, win='labels')
     best_map = 0
     lr_ = opt.lr
     for epoch in range(opt.epoch):

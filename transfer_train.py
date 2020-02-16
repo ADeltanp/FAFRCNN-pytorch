@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 # though cupy is not used but without this line, it raise errors...
-import cupy as cp
 import os
 
 import ipdb
@@ -8,8 +7,8 @@ import matplotlib
 from itertools import cycle
 from tqdm import tqdm
 
-from model.frcnn.utils.config import opt
-from model.frcnn.data.traindataset import TrainDataset, TestDataset, inverse_normalize
+from utils.config import opt
+from data.dataset import TrainDataset, TestDataset, inverse_normalize
 from model.frcnn.model.faster_rcnn_vgg16 import FasterRCNNVGG16
 from torch.utils import data as data_
 from transfer_trainer import TransferTrainer
@@ -51,46 +50,47 @@ def eval(dataloader, faster_rcnn, test_num=10000):
 
 def transfer_train(best_path):
     print('load transfer training data')
-    dataset = TrainDataset(opt)
-    source_dataloader = data_.DataLoader(dataset,
+    source_data = TrainDataset(opt, opt.clear_data_dir)
+    source_dataloader = data_.DataLoader(source_data,
                                          batch_size=1,
                                          shuffle=True,
                                          # pin_memory=True,
                                          num_workers=opt.num_workers)
 
-    target_set = TestDataset(opt, 'val', data_path=opt.dota_data_dir)
-    target_dataloader = data_.DataLoader(target_set,
+    target_data = TrainDataset(opt, opt.hazy_data_dir)
+    target_dataloader = data_.DataLoader(target_data,
                                          batch_size=1,
                                          num_workers=opt.num_workers,
                                          shuffle=True,
                                          pin_memory=True)
 
-    testset = TestDataset(opt, data_path=opt.dota_data_dir)
-    test_dataloader = data_.DataLoader(testset,
+    target_test = TestDataset(opt, opt.hazy_data_dir)
+    test_dataloader = data_.DataLoader(target_test,
                                        batch_size=1,
                                        num_workers=opt.test_num_workers,
                                        shuffle=False,
                                        pin_memory=True)
 
     faster_rcnn = FasterRCNNVGG16()
-    trainer = TransferTrainer(faster_rcnn, opt.dota_num_class).cuda().load(best_path)
+    trainer = TransferTrainer(faster_rcnn, opt.dota_num_class).cuda()
+    trainer.load(best_path)
 
-    trainer.vis.text(dataset.db.label_names, win='labels')
+    trainer.vis.text(source_data.db.label_names, win='labels')
     best_map = 0
     lr_ = opt.lr
-    target_len = len(target_set)
+    target_len = len(target_data)
     for epoch in range(opt.transfer_epoch):
         trainer.reset_meters()
 
-        for ii, (s_img, s_bbox_, s_label_, s_scale,
-                 t_img, t_bbox_, t_label_, t_scale
-                 ) in tqdm(enumerate(zip(source_dataloader, cycle(target_dataloader)))):
-
+        for ii, (s_, t_) in tqdm(enumerate(zip(source_dataloader, cycle(target_dataloader)))):
+            s_img, s_bbox_, s_label_, s_scale = s_
+            t_img, t_bbox_, t_label_, t_scale = t_
             s_scale = at.scalar(s_scale)
+            t_scale = at.scalar(t_scale)
             s_img, s_bbox, s_label = s_img.cuda().float(), s_bbox_.cuda(), s_label_.cuda()
             t_img, t_bbox, t_label = t_img.cuda().float(), t_bbox_.cuda(), t_label_.cuda()
             trainer.train_step(s_img, s_bbox, s_label, s_scale,
-                               t_img, t_bbox, t_label, t_scale)
+                               t_img, t_bbox, t_label, t_scale, ii)
 
             if (ii + 1) % opt.plot_every == 0:
                 if os.path.exists(opt.debug_file):

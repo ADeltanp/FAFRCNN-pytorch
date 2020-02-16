@@ -5,7 +5,7 @@ import matplotlib
 import torch as t
 import visdom
 from matplotlib import pyplot as plot
-from model.frcnn.utils.config import opt
+from utils.config import opt
 matplotlib.use('Agg')
 
 
@@ -186,7 +186,7 @@ class Visualizer(object):
         """
         self.plot('loss',1.00)
         """
-        x = self.index.get(name, default=0)
+        x = self.index.get(name, 0)
         self.vis.line(Y=np.array([y]), X=np.array([x]),
                       win=name,
                       opts=dict(title=name),

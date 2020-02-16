@@ -4,8 +4,8 @@ import ipdb
 import matplotlib
 from tqdm import tqdm
 
-from model.frcnn.utils.config import opt
-from model.frcnn.data.traindataset import TrainDataset, TestDataset
+from utils.config import opt
+from data.dataset import TrainDataset, TestDataset
 from model.frcnn.model.faster_rcnn_vgg16 import FasterRCNNVGG16
 from torch.utils import data as data_
 from transfer_trainer import TransferTrainer

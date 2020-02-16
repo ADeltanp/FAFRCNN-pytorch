@@ -2,11 +2,12 @@ from __future__ import absolute_import
 import torch as t
 from torch import nn
 from torchvision.models import vgg16
+from torchvision.ops import roi_pool
 from model.frcnn.model.region_proposal_network import RegionProposalNetwork
 from model.frcnn.model.faster_rcnn import FasterRCNN
-from model.frcnn.model.roi_module import RoIPooling2D
+# from utils.roi_pooling.roi_module import RoIPooling2D
 from model.frcnn.utils import array_tool as at
-from model.frcnn.utils.config import opt
+from utils.config import opt
 
 
 def decom_vgg16():
@@ -110,9 +111,9 @@ class VGG16RoIHead(nn.Module):
         normal_init(self.score, 0, 0.01)
 
         self.n_class = n_class
-        self.roi_size = roi_size
+        self.roi_size = (roi_size, roi_size)
         self.spatial_scale = spatial_scale
-        self.roi = RoIPooling2D(self.roi_size, self.roi_size, self.spatial_scale)
+        # self.roi = RoIPooling2D(self.roi_size, self.roi_size, self.spatial_scale)
 
     def forward(self, x, rois, roi_indices):
         """Forward the chain.
@@ -137,9 +138,9 @@ class VGG16RoIHead(nn.Module):
         indices_and_rois = t.cat([roi_indices[:, None], rois], dim=1)
         # NOTE: important: yx->xy
         xy_indices_and_rois = indices_and_rois[:, [0, 2, 1, 4, 3]]
-        indices_and_rois =  xy_indices_and_rois.contiguous()
+        indices_and_rois = xy_indices_and_rois.contiguous()
 
-        pool = self.roi(x, indices_and_rois)
+        pool = roi_pool(x, indices_and_rois, self.roi_size, self.spatial_scale)
         pool = pool.view(pool.size(0), -1)
         fc7 = self.classifier(pool)
         roi_cls_locs = self.cls_loc(fc7)
@@ -161,7 +162,7 @@ class VGG16RoIHead(nn.Module):
         xy_indices_and_rois = indices_and_rois[:, [0, 2, 1, 4, 3]]
         indices_and_rois = xy_indices_and_rois.contiguous()
 
-        pool = self.roi(x, indices_and_rois)
+        pool = roi_pool(x, indices_and_rois, self.roi_size, self.spatial_scale)
         pool = pool.view(pool.size(0), -1)
         fc7 = self.classifier(pool)
         return fc7

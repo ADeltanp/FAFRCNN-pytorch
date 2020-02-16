@@ -10,26 +10,28 @@ class Config:
     DOTA_LABEL_NAMES = (
         'plane',
         'ship',
-        'storage_tank',
-        'baseball_diamond',
-        'tennis_court',
-        'basketball_court',
-        'ground_track_field',
+        'storage-tank',
+        'baseball-diamond',
+        'tennis-court',
+        'basketball-court',
+        'ground-track-field',
         'harbor',
         'bridge',
-        'large_vehicle',
-        'small_vehicle',
+        'large-vehicle',
+        'small-vehicle',
         'helicopter',
         'roundabout',
-        'soccer_ball_field',
-        'swimming_pool',
-        'container_crane'
+        'soccer-ball-field',
+        'swimming-pool',
+        'container-crane'
     )
-    voc_data_dir = 'E:/Data/NN/VOCdevkit/VOC2012'
-    dota_data_dir = 'E:/Data/NN/DOTA'
+    clear_data_dir = 'E:/Data/NN/DOTA'
+    hazy_data_dir = 'E:/Data/NN/hazy_DOTA'
     dota_num_class = len(DOTA_LABEL_NAMES)
-    min_size = 600   # image resize
-    max_size = 1000  # image resize
+    # TODO MOD size of img
+    min_size = 900   # image resize
+    max_size = 1500  # image resize
+    batch_size = 1
     num_workers = 8
     test_num_workers = 8
 
@@ -50,7 +52,7 @@ class Config:
     plot_every = 40  # vis every N iter
 
     # preset
-    data = 'voc'
+    data = 'dota'  # TODO MOD preset?
     pretrained_model = 'vgg16'
 
     # training

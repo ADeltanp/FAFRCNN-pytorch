@@ -8,9 +8,9 @@ from model.frcnn.model.utils.bbox_tools import loc2bbox
 from model.frcnn.model.utils.nms import non_maximum_suppression
 
 from torch import nn
-from model.frcnn.data.traindataset import preprocess
+from data.dataset import preprocess
 from torch.nn import functional as F
-from model.frcnn.utils.config import opt
+from utils.config import opt
 
 
 def nograd(f):
@@ -18,6 +18,7 @@ def nograd(f):
         with t.no_grad():
            return f(*args,**kwargs)
     return new_f
+
 
 class FasterRCNN(nn.Module):
     """Base class for Faster R-CNN.

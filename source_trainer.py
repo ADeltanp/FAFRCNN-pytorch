@@ -10,7 +10,7 @@ from torchnet.meter import ConfusionMeter, AverageValueMeter
 
 from model.frcnn.utils import array_tool as at
 from model.frcnn.utils.vis_tool import Visualizer
-from model.frcnn.utils.config import opt
+from utils.config import opt
 from model.frcnn.model.utils.creator_tool import AnchorTargetCreator, ProposalTargetCreator
 
 LossTuple = namedtuple('LossTuple',
@@ -144,7 +144,7 @@ class SourceTrainer(nn.Module):
         # ------------------ ROI losses (fast rcnn loss) -------------------#
         n_sample = roi_cls_loc.shape[0]
         roi_cls_loc = roi_cls_loc.view(n_sample, -1, 4)
-        roi_loc = roi_cls_loc[t.arange(0, n_sample).long().cuda(), \
+        roi_loc = roi_cls_loc[t.arange(0, n_sample).long().cuda(),
                               at.totensor(gt_roi_label).long()]
         gt_roi_label = at.totensor(gt_roi_label).long()
         gt_roi_loc = at.totensor(gt_roi_loc)

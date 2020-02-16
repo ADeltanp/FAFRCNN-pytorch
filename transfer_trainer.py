@@ -8,14 +8,13 @@ from torch import nn
 from torch.nn import functional as F
 from torchnet.meter import ConfusionMeter, AverageValueMeter
 
-from utils.smfr import smfr
 from utils.pair import pair
-from utils.split_pooling.split_pooling import SplitPooling
+from utils.split_pooling import SplitPooling
 
 from model.discriminator.gan import GANInstance, GANImage
 from model.frcnn.utils import array_tool as at
 from model.frcnn.utils.vis_tool import Visualizer
-from model.frcnn.utils.config import opt
+from utils.config import opt
 from model.frcnn.model.utils.creator_tool import AnchorTargetCreator, ProposalTargetCreator
 from model.frcnn.model.transfer_ptl import TransferPTL
 
@@ -26,7 +25,7 @@ LossTuple = namedtuple('LossTuple',
                         'roi_cls_loss',
                         'img_gan_loss',
                         'ins_gan_loss',
-                        'total_loss'
+                        'frcnn_loss'
                         ])
 
 
@@ -40,31 +39,39 @@ class TransferTrainer(nn.Module):
     * :obj:`rpn_cls_loss`: The classification loss for RPN.
     * :obj:`roi_loc_loss`: The localization loss for the head module.
     * :obj:`roi_cls_loss`: The classification loss for the head module.
-    * :obj:`total_loss`: The sum of 4 loss above.
+    * :obj:`frcnn_loss`: The sum of 4 loss above.
 
     Args:
         faster_rcnn (model.FasterRCNN):
             A Faster R-CNN model that is going to be trained.
     """
 
-    def __init__(self, faster_rcnn, num_class):
+    def __init__(self, faster_rcnn, num_class, roi_h=7, roi_w=7):
         super(TransferTrainer, self).__init__()
+        self.i = 0
+        self.roi_h = roi_h
+        self.roi_w = roi_w
         self.num_class = num_class
 
         self.faster_rcnn = faster_rcnn
         self.rpn_sigma = opt.rpn_sigma
         self.roi_sigma = opt.roi_sigma
-        self.split_pooling = SplitPooling()
+        self.split_pooling = SplitPooling(roi_h=roi_h, roi_w=roi_w)
 
         # target creator create gt_bbox gt_label etc as training targets. 
         self.anchor_target_creator = AnchorTargetCreator()
+        self.proposal_target_creator = ProposalTargetCreator()
         self.transfer_ptl = TransferPTL()
 
         self.gan_il = GANImage(7, 7)
         self.gan_im = GANImage(7, 7)
         self.gan_is = GANImage(7, 7)
         self.gan_ins = GANInstance(num_class)
-        self.gan_optim = self._init_optim()
+        self.s_fc7s = [[] for j in range(self.num_class)]
+        self.t_fc7s = [[] for j in range(self.num_class)]
+        self.ins_loss = 0.0
+        self.img_gan_optim = self._init_img_optim()
+        self.ins_gan_optim = self._init_ins_optim()
 
         self.loc_normalize_mean = faster_rcnn.loc_normalize_mean
         self.loc_normalize_std = faster_rcnn.loc_normalize_std
@@ -83,7 +90,8 @@ class TransferTrainer(nn.Module):
         self.roi_cm = ConfusionMeter(21)
         self.meters = {k: AverageValueMeter() for k in LossTuple._fields}  # average loss
 
-    def forward(self, source_imgs, s_bboxes, s_labels, s_scale, target_imgs, t_bboxes, t_labels, t_scale):
+    def forward(self, source_imgs, s_bboxes, s_labels, s_scale,
+                target_imgs, t_bboxes, t_labels, t_scale):
         """Forward Faster R-CNN and calculate losses.
 
         Here are notations used.
@@ -159,18 +167,21 @@ class TransferTrainer(nn.Module):
             at.tonumpy(t_label))
 
         # NOTE it's all zero because now it only support for batch=1 now
-        sample_roi_index = t.zeros(len(s_sample_roi))
-        s_fc7 = self.faster_rcnn.half_forward(
+        s_sample_roi_index = t.zeros(len(s_sample_roi))
+        t_sample_roi_index = t.zeros(len(t_sample_roi))
+        s_fc7 = self.faster_rcnn.head.half_forward(
             s_features,
             s_sample_roi,
-            sample_roi_index)
+            s_sample_roi_index)
 
-        t_fc7 = self.faster_rcnn.half_forward(
+        t_fc7 = self.faster_rcnn.head.half_forward(
             t_features,
             t_sample_roi,
-            sample_roi_index)  # (R, 4096)
+            t_sample_roi_index)  # (R, 4096)
 
-        ins_gan_loss = self.instance_level_gan_loss(s_fc7, s_label, t_fc7, t_label, num_class=self.num_class)
+        self.instance_level_cache(s_fc7, s_label, t_fc7, t_label)
+        if (self.i + 1) % 4 == 0:
+            self.ins_loss = self.instance_level_gan_loss()
 
         # Original Faster R-CNN training continues
         sample_roi, gt_roi_loc, gt_roi_label = self.proposal_target_creator(
@@ -180,11 +191,11 @@ class TransferTrainer(nn.Module):
             self.loc_normalize_mean,
             self.loc_normalize_std)
         # NOTE it's all zero because now it only support for batch=1 now
-        sample_roi_index = t.zeros(len(sample_roi))
+        s_sample_roi_index = t.zeros(len(sample_roi))
         roi_cls_loc, roi_score = self.faster_rcnn.head(
             s_features,
             sample_roi,
-            sample_roi_index)
+            s_sample_roi_index)
 
         # ------------------ RPN losses -------------------#
         gt_rpn_loc, gt_rpn_label = self.anchor_target_creator(
@@ -207,90 +218,117 @@ class TransferTrainer(nn.Module):
         # ------------------ ROI losses (fast rcnn loss) -------------------#
         n_sample = roi_cls_loc.shape[0]
         roi_cls_loc = roi_cls_loc.view(n_sample, -1, 4)
-        roi_loc = roi_cls_loc[t.arange(0, n_sample).long().cuda(), \
-                              at.totensor(s_gt_roi_label).long()]
-        s_gt_roi_label = at.totensor(s_gt_roi_label).long()
-        s_gt_roi_loc = at.totensor(gt_roi_loc)
+        roi_loc = roi_cls_loc[t.arange(0, n_sample).long().cuda(),
+                              at.totensor(gt_roi_label).long()]
+        gt_roi_label = at.totensor(gt_roi_label).long()
+        gt_roi_loc = at.totensor(gt_roi_loc)
 
         roi_loc_loss = _fast_rcnn_loc_loss(
             roi_loc.contiguous(),
-            s_gt_roi_loc,
-            s_gt_roi_label.data,
+            gt_roi_loc,
+            gt_roi_label.data,
             self.roi_sigma)
 
-        roi_cls_loss = nn.CrossEntropyLoss()(roi_score, s_gt_roi_label.cuda())
+        roi_cls_loss = nn.CrossEntropyLoss()(roi_score, gt_roi_label.cuda())
 
-        self.roi_cm.add(at.totensor(roi_score, False), s_gt_roi_label.data.long())
+        self.roi_cm.add(at.totensor(roi_score, False), gt_roi_label.data.long())
 
-        losses = [rpn_loc_loss, rpn_cls_loss, roi_loc_loss, roi_cls_loss, img_gan_loss, ins_gan_loss]
-        losses = losses + [sum(losses)]
+        losses = [rpn_loc_loss, rpn_cls_loss, roi_loc_loss, roi_cls_loss, img_gan_loss, self.ins_loss]
+        losses = losses + [sum(losses[:4])]
 
         return LossTuple(*losses)
 
     def image_level_gan_loss(self, s_feat, t_feat, s_img_size, t_img_size):
-        s_grid_l, s_grid_m, s_grid_s = self.split_pooling((s_img_size[1], s_img_size[0]), s_feat)
-        t_grid_l, t_grid_m, t_grid_s = self.split_pooling((t_img_size[1], t_img_size[0]), t_feat)
+        # (N * G, C, 7, 7)
+        s_grid_l, s_grid_m, s_grid_s = self.split_pooling((s_img_size[0], s_img_size[1]), s_feat)
+        t_grid_l, t_grid_m, t_grid_s = self.split_pooling((t_img_size[0], t_img_size[1]), t_feat)
 
-        grid_pair_l_ss, grid_pair_l_st = pair(s_grid_l, t_grid_l)
-        grid_pair_m_ss, grid_pair_m_st = pair(s_grid_m, t_grid_m)
-        grid_pair_s_ss, grid_pair_s_st = pair(s_grid_s, t_grid_s)
+        l_pair_size = 32
+        m_pair_size = 256
+        s_pair_size = 1024
+        # (i_pair_size, C, 7, 14)
+        grid_pair_l_ss, grid_pair_l_st = pair(s_grid_l, t_grid_l, source_num=l_pair_size, target_num=l_pair_size)
+        grid_pair_m_ss, grid_pair_m_st = pair(s_grid_m, t_grid_m, source_num=m_pair_size, target_num=m_pair_size)
+        grid_pair_s_ss, grid_pair_s_st = pair(s_grid_s, t_grid_s, source_num=s_pair_size, target_num=s_pair_size)
+        c = grid_pair_l_ss.size(1)
+
+        # (i_pair_size * 2, C, 7, 14)
+        l_pairs = t.cat((grid_pair_l_ss, grid_pair_l_st))
+        m_pairs = t.cat((grid_pair_m_ss, grid_pair_m_st))
+        s_pairs = t.cat((grid_pair_s_ss, grid_pair_s_st))
+
+        # i_pair_size = grid_pair_i_ss.size(0)
+        l_labels = t.cat((t.zeros(l_pair_size * c), t.ones(l_pair_size * c))).long().cuda()
+        m_labels = t.cat((t.zeros(m_pair_size * c), t.ones(m_pair_size * c))).long().cuda()
+        s_labels = t.cat((t.zeros(s_pair_size * c), t.ones(s_pair_size * c))).long().cuda()
+
+        # (i_pair_size * 2, C, 7, 14) -> (2ips, C, 98) -> (2ips * C, 98)
+        out_l = self.gan_il(l_pairs.flatten(2).flatten(0, 1))
+        out_m = self.gan_im(m_pairs.flatten(2).flatten(0, 1))
+        out_s = self.gan_is(s_pairs.flatten(2).flatten(0, 1))
 
         criterion = nn.CrossEntropyLoss()
-        l_pairs = t.cat((grid_pair_l_ss, grid_pair_l_st))  # (R + R', 7, 7)
-        l_labels = t.cat((t.zeros(len(grid_pair_l_ss)), t.ones(len(grid_pair_l_st))))
-        m_pairs = t.cat((grid_pair_m_ss, grid_pair_m_st))
-        m_labels = t.cat((t.zeros(len(grid_pair_m_ss)), t.ones(len(grid_pair_m_st))))
-        s_pairs = t.cat((grid_pair_s_ss, grid_pair_s_st))
-        s_labels = t.cat((t.zeros(len(grid_pair_s_ss)), t.ones(len(grid_pair_s_st))))
-
-        out_l = self.gan_il(l_pairs)
-        out_m = self.gan_im(m_pairs)
-        out_s = self.gan_is(s_pairs)
         loss = criterion(out_l, l_labels)
         loss += criterion(out_m, m_labels)
         loss += criterion(out_s, s_labels)
 
         return loss
 
-    def instance_level_gan_loss(self, s_fc7, s_label, t_fc7, t_label, num_class):
-        ss_pair = list()
-        st_pair = list()
-        ss_gan_label = list()
-        st_gan_label = list()
-        for i in range(num_class):
+    def instance_level_cache(self, s_fc7, s_label, t_fc7, t_label):
+        for i in range(self.num_class):
             s_idx = t.where(s_label == i)
             t_idx = t.where(t_label == i)
-            if len(s_idx) == 0 or len(t_idx) == 0:
-                continue
-            ss, st = pair(s_fc7[s_idx], t_fc7[t_idx])  # (l_i, 2 * 4096)
-            ss_pair.append(ss)  # R * (l_i, 2 * 4096) --cat--> (R * l_i, 2 * 4096)
-            st_pair.append(st)
-            ss_gan_label.append(2 * i * t.ones(len(ss)))
-            st_gan_label.append(2 * i * t.ones(len(st)) + 1)
+            if len(s_idx) != 0:
+                self.s_fc7s[i].append(s_fc7[s_idx])
+            if len(t_idx) != 0:
+                self.t_fc7s[i].append(t_fc7[t_idx])
 
-        ss_pair = t.cat(ss_pair)
-        st_pair = t.cat(st_pair)
-        ss_gan_label = t.cat(ss_gan_label).int()
-        st_gan_label = t.cat(st_gan_label).int()
-        # TODO Decide whether feed all in one time
-        # dataloader = instance_pair_dataloader(ss_pair, st_pair, ss_gan_label, st_gan_label)
-        pairs = t.cat((ss_pair, st_pair))
-        labels = t.cat((ss_gan_label, st_gan_label))
+    def instance_level_gan_loss(self):
+        loss = 0.0
         criterion = nn.CrossEntropyLoss()
-        out = self.gan_ins(pairs)
-        loss = criterion(out, labels)
+        for i in range(self.num_class):
+            if len(self.s_fc7s[i]) == 0 or len(self.t_fc7s[i]) == 0:
+                continue
+            ss, st = pair(t.cat(self.s_fc7s[i]), t.cat(self.t_fc7s[i]))  # (l_i, 2 * 4096)
+            ss = ss.cuda()
+            st = st.cuda()
+            ss_label = 2 * i * t.ones(len(ss)).long().cuda()
+            st_label = 2 * i * t.ones(len(st)).long().cuda() + 1
+            pairs = t.cat((ss, st))
+            labels = t.cat((ss_label, st_label))
+
+            out = self.gan_ins(pairs)
+            loss += criterion(out, labels)
+
+        # clear cache
+        self.s_fc7s = [[] for j in range(self.num_class)]
+        self.t_fc7s = [[] for j in range(self.num_class)]
         return loss
 
-    def train_step(self,
-                   s_imgs, s_bboxes, s_labels, s_scale,
-                   t_imgs, t_bboxes, t_labels, t_scale):
-        self.optimizer.zero_grad()
-        self.gan_optim.zero_grad()
+    def train_step(self, s_imgs, s_bboxes, s_labels, s_scale,
+                   t_imgs, t_bboxes, t_labels, t_scale, i):
+        self.i = i
+        do_ins_gan = (self.i + 1) % 4 == 0
         losses = self.forward(s_imgs, s_bboxes, s_labels, s_scale,
                               t_imgs, t_bboxes, t_labels, t_scale)
-        losses.total_loss.backward()
+
+        self.img_gan_optim.zero_grad()
+        losses.img_gan_loss.backward(retain_graph=True)
+        self.img_gan_optim.step()
+
+        if do_ins_gan:
+            self.ins_gan_optim.zero_grad()
+            losses.ins_gan_loss.backward(retain_graph=True)
+            self.ins_gan_optim.step()
+
+        self.optimizer.zero_grad()
+        losses.frcnn_loss.backward()
+        gan_loss = -losses.img_gan_loss
+        if do_ins_gan:
+            gan_loss -= losses.ins_gan_loss
+        gan_loss.backward()
         self.optimizer.step()
-        self.gan_optim.step()
+
         self.update_meters(losses)
         return losses
 
@@ -355,16 +393,19 @@ class TransferTrainer(nn.Module):
     def get_meter_data(self):
         return {k: v.value()[0] for k, v in self.meters.items()}
 
-    def _init_optim(self):
+    def _init_img_optim(self):
         gan_il_param = self.gan_il.parameters()
         gan_im_param = self.gan_im.parameters()
         gan_is_param = self.gan_is.parameters()
+        img_gan_optim = t.optim.SGD([{'params': gan_il_param},
+                                     {'params': gan_im_param},
+                                     {'params': gan_is_param}], lr=opt.lr, momentum=0.9)
+        return img_gan_optim
+
+    def _init_ins_optim(self):
         gan_ins_param = self.gan_ins.parameters()
-        gan_optim = t.optim.SGD([{'params': gan_il_param},
-                                 {'params': gan_im_param},
-                                 {'params': gan_is_param},
-                                 {'params': gan_ins_param}], lr=opt.lr, momentum=0.9)
-        return gan_optim
+        ins_gan_optim = t.optim.SGD([{'params': gan_ins_param}], lr=opt.lr, momentum=0.9)
+        return ins_gan_optim
 
 
 def _smooth_l1_loss(x, t, in_weight, sigma):
